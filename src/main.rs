@@ -31,7 +31,7 @@ pub async fn read_stream(mut reader: &mut BufReader<&TcpStream>) -> io::Result<B
 /*
     read_xor_stream paired with write_xor_stream
 */
-pub async fn read_xor_stream(mut reader: &mut BufReader<&TcpStream>) -> io::Result<Box<[u8]>> {
+pub async fn read_xor_stream(reader: &mut BufReader<&TcpStream>) -> io::Result<Box<[u8]>> {
     let mut buffer: Vec<u8> = vec![0; 1024];
     match reader.read(&mut buffer).await {
         Ok(len) => {
@@ -42,9 +42,12 @@ pub async fn read_xor_stream(mut reader: &mut BufReader<&TcpStream>) -> io::Resu
         Err(err) => Err(err),
     }
 }
-
+pub fn write_xor_stream(reader: &BufWriter<&TcpStream>, data: &mut Box<[u8]>) -> EcResult<()> {
+    data.iter_mut().for_each(|x| *x ^= 0x55);
+    Ok(())
+}
 pub async fn do_forward(mut stream: TcpStream, up_addr: &str) ->  EcResult<()> {
-    println!("connecting: {}", stream.peer_addr()?);
+    println!("connecting: {} -> {:?}", stream.peer_addr()?, up_addr);
 
     let (reader, mut writer) = (&stream, &stream);
     let mut reader = BufReader::new(reader);
@@ -81,8 +84,8 @@ pub async fn do_forward(mut stream: TcpStream, up_addr: &str) ->  EcResult<()> {
                     println!("Connection was closed by remote peer");
                     break;
                 },
-                Ok(data) => {
-
+                Ok(mut data) => {
+                    write_xor_stream(&writer, &mut data);
                     writer.write_all(&data).await?;
                     writer.flush().await?;
                     let a = String::from_utf8((&data).to_vec());
@@ -98,7 +101,7 @@ pub async fn do_forward(mut stream: TcpStream, up_addr: &str) ->  EcResult<()> {
 }
 
 async fn start_server() -> std::io::Result<()> {
-    let server = TcpListener::bind("0.0.0.0:8081").await?;
+    let server = TcpListener::bind("0.0.0.0:8080").await?;
     println!("listening: {}", server.local_addr()?);
     
     let up_addr = "0.0.0.0:80";
@@ -109,7 +112,7 @@ async fn start_server() -> std::io::Result<()> {
 
         task::spawn(async{
             println!("incoming");
-            if let Err(s) = do_forward(stream, "172.105.242.229:8081").await{
+            if let Err(s) = do_forward(stream, "localhost:8081").await{
                 println!("connect forward failed: {:?}", s);
             }
             println!("incoming done");
